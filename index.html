@@ -1,0 +1,1180 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>表情包切分工具</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden}
+body{font-family:"Microsoft YaHei","PingFang SC","Helvetica Neue",sans-serif;
+  background:#f0f4f9;color:#2d3748;font-size:14px}
+
+/* ── layout ─────────────────────────── */
+.app{display:flex;flex-direction:column;height:100vh}
+
+header{
+  background:linear-gradient(135deg,#4361ee 0%,#7209b7 100%);
+  color:#fff;padding:10px 20px;
+  display:flex;align-items:center;gap:12px;flex-shrink:0;
+  box-shadow:0 2px 10px rgba(67,97,238,.35)
+}
+header h1{font-size:17px;font-weight:700;letter-spacing:.5px}
+header .tagline{font-size:12px;opacity:.75;margin-left:4px}
+
+.main{display:flex;flex:1;overflow:hidden;padding:12px;gap:12px}
+
+/* ── left panel ─────────────────────── */
+.left-panel{flex:1;display:flex;flex-direction:column;min-width:0;gap:8px}
+
+/* ── thumbnail strip ────────────────── */
+.thumb-strip{
+  display:flex;flex-shrink:0;
+  background:#fff;border-radius:12px;
+  box-shadow:0 1px 5px rgba(0,0,0,.07);
+  padding:8px 10px;
+  flex-direction:row;align-items:center;gap:8px;
+  overflow-x:auto;min-height:90px
+}
+.thumb-strip::-webkit-scrollbar{height:4px}
+.thumb-strip::-webkit-scrollbar-thumb{background:#dde3ea;border-radius:2px}
+
+.thumb-item{
+  position:relative;flex-shrink:0;
+  width:72px;height:72px;border-radius:8px;
+  overflow:hidden;cursor:pointer;
+  border:2.5px solid transparent;
+  transition:border-color .15s;background:#f0f4f9
+}
+.thumb-item:hover{border-color:#a0aec0}
+.thumb-item.active{border-color:#4361ee;box-shadow:0 0 0 2px rgba(67,97,238,.2)}
+.thumb-item img{width:100%;height:100%;object-fit:cover;display:block}
+
+.thumb-del{
+  position:absolute;top:3px;right:3px;
+  width:18px;height:18px;border-radius:50%;
+  background:rgba(0,0,0,.55);color:#fff;
+  border:none;font-size:12px;line-height:1;
+  cursor:pointer;display:flex;align-items:center;justify-content:center;
+  opacity:0;transition:opacity .15s
+}
+.thumb-item:hover .thumb-del{opacity:1}
+
+.thumb-badge{
+  position:absolute;bottom:3px;left:3px;
+  background:rgba(0,0,0,.6);color:#fff;
+  font-size:9px;padding:2px 5px;border-radius:4px;
+  pointer-events:none;white-space:nowrap
+}
+
+.thumb-add{
+  flex-shrink:0;width:72px;height:72px;border-radius:8px;
+  border:2px dashed #b0bec5;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  cursor:pointer;color:#b0bec5;
+  transition:border-color .15s,color .15s;
+  font-size:11px;gap:4px
+}
+.thumb-add svg{flex-shrink:0}
+.thumb-add:hover{border-color:#4361ee;color:#4361ee}
+
+/* ── drop zone ──────────────────────── */
+.drop-zone{
+  flex:1;border:2px dashed #b0bec5;border-radius:14px;
+  background:#fff;position:relative;overflow:hidden;
+  display:flex;align-items:center;justify-content:center;
+  cursor:pointer;transition:border-color .2s,background .2s;
+  min-height:0
+}
+.drop-zone:hover,.drop-zone.dragover{border-color:#4361ee;background:#eef1ff}
+.drop-zone.dragover{background:#e3e9ff}
+
+.drop-placeholder{
+  text-align:center;color:#90a4ae;
+  display:flex;flex-direction:column;align-items:center;gap:10px;padding:20px;
+  pointer-events:none
+}
+.drop-placeholder .icon-wrap{
+  width:72px;height:72px;border-radius:50%;
+  background:linear-gradient(135deg,#eef1ff,#e3e9ff);
+  display:flex;align-items:center;justify-content:center
+}
+.drop-placeholder h3{font-size:15px;color:#607d8b;font-weight:600}
+.drop-placeholder p{font-size:12px;line-height:1.6}
+.badges{display:flex;gap:8px;justify-content:center;margin-top:4px;flex-wrap:wrap}
+.badge{
+  background:#f1f5f9;color:#546e7a;
+  border:1px solid #cfd8dc;border-radius:6px;
+  padding:3px 10px;font-size:12px;font-family:monospace
+}
+
+#previewCanvas{
+  position:absolute;inset:0;width:100%;height:100%;
+  display:none;cursor:pointer
+}
+.paste-hint{
+  position:absolute;bottom:10px;left:50%;
+  transform:translateX(-50%);
+  background:rgba(67,97,238,.9);color:#fff;
+  padding:5px 14px;border-radius:20px;font-size:12px;
+  opacity:0;transition:opacity .4s;pointer-events:none;white-space:nowrap
+}
+.paste-hint.show{opacity:1}
+
+/* ── right panel ────────────────────── */
+.right-panel{
+  width:315px;flex-shrink:0;
+  display:flex;flex-direction:column;gap:10px;
+  overflow-y:auto;padding-bottom:4px
+}
+.right-panel::-webkit-scrollbar{width:4px}
+.right-panel::-webkit-scrollbar-thumb{background:#dde3ea;border-radius:2px}
+
+.card{
+  background:#fff;border-radius:12px;padding:13px 14px;
+  box-shadow:0 1px 5px rgba(0,0,0,.06);flex-shrink:0
+}
+.card-title{
+  font-size:13px;font-weight:700;color:#4361ee;
+  margin-bottom:10px;display:flex;align-items:center;gap:7px
+}
+.card-title .num{
+  width:20px;height:20px;border-radius:50%;
+  background:#4361ee;color:#fff;font-size:11px;font-weight:700;
+  display:flex;align-items:center;justify-content:center;flex-shrink:0
+}
+
+/* ── form ───────────────────────────── */
+.row{display:flex;align-items:center;gap:6px;margin-bottom:7px}
+.row:last-child{margin-bottom:0}
+label{font-size:13px;color:#546e7a;white-space:nowrap}
+.lbl{min-width:60px}
+
+input[type=number],input[type=text],select{
+  border:1px solid #e0e6ed;border-radius:7px;
+  padding:5px 8px;font-size:13px;font-family:inherit;
+  color:#2d3748;background:#fff;width:100%;
+  transition:border-color .2s,box-shadow .2s
+}
+input[type=number]{width:64px}
+input[type=number]:focus,input[type=text]:focus,select:focus{
+  outline:none;border-color:#4361ee;box-shadow:0 0 0 3px rgba(67,97,238,.12)
+}
+input:disabled,select:disabled{background:#f7fafc;color:#b0bec5;cursor:default}
+select{cursor:pointer}
+
+.info-text{font-size:11px;color:#90a4ae;line-height:1.65;margin-top:3px}
+.total-info{font-size:12px;color:#607d8b;margin-top:5px}
+.detect-result{font-size:13px;color:#2d3748;line-height:1.6}
+.detect-result.muted{color:#90a4ae}
+
+.btn-sm{
+  background:#f1f5f9;color:#4a5568;border:1px solid #e2e8f0;
+  border-radius:7px;padding:5px 12px;font-size:12px;
+  cursor:pointer;font-family:inherit;transition:background .15s;white-space:nowrap
+}
+.btn-sm:hover{background:#e2e8f0}
+.btn-sm:disabled{opacity:.5;cursor:default}
+
+/* ── bg color picker ─────────────────── */
+.bg-picker{display:flex;align-items:center;gap:4px;flex-wrap:wrap}
+.bg-swatch{
+  width:22px;height:22px;border-radius:4px;
+  border:2px solid rgba(0,0,0,.15);
+  cursor:pointer;padding:0;flex-shrink:0;
+  transition:border-color .15s,box-shadow .15s
+}
+.bg-swatch:hover{border-color:#a0aec0}
+.bg-swatch.active{border-color:#4361ee;box-shadow:0 0 0 2px rgba(67,97,238,.25)}
+.bg-swatch.transp{background:repeating-conic-gradient(#ccc 0% 25%,#fff 0% 50%) 0/10px 10px}
+#bgColorPicker{
+  width:26px;height:26px;padding:1px;
+  border:1.5px solid #d2d8e3;border-radius:4px;
+  cursor:pointer;flex-shrink:0;transition:opacity .15s
+}
+#bgColorPicker:disabled{cursor:not-allowed}
+.bg-hex-input{
+  width:76px;font-size:12px;padding:3px 6px;
+  border:1.5px solid #d2d8e3;border-radius:4px;
+  font-family:monospace;color:#2d3748
+}
+.bg-hex-input:focus{outline:none;border-color:#4361ee}
+.bg-hex-input:disabled{opacity:.45;cursor:not-allowed}
+.btn-eyedropper{
+  width:26px;height:26px;border-radius:4px;
+  border:1.5px solid #d2d8e3;
+  display:flex;align-items:center;justify-content:center;
+  cursor:pointer;background:#fff;color:#4a5568;
+  flex-shrink:0;transition:border-color .15s,color .15s
+}
+.btn-eyedropper:hover{border-color:#4361ee;color:#4361ee}
+
+.folder-row{display:flex;gap:6px;align-items:center;margin-bottom:6px}
+.dir-label{font-size:11px;color:#90a4ae;word-break:break-all;margin-top:2px}
+
+/* ── generate buttons ───────────────── */
+.gen-group{display:flex;flex-direction:column;gap:8px;flex-shrink:0}
+.gen-btn{
+  background:linear-gradient(135deg,#4361ee,#7209b7);
+  color:#fff;border:none;border-radius:12px;
+  padding:0 16px;height:46px;font-size:14px;font-weight:700;
+  font-family:inherit;cursor:pointer;width:100%;
+  box-shadow:0 4px 14px rgba(67,97,238,.3);
+  transition:opacity .2s,transform .1s
+}
+.gen-btn:hover{opacity:.91}
+.gen-btn:active{transform:scale(.98)}
+.gen-btn:disabled{opacity:.4;cursor:not-allowed;transform:none}
+.gen-all-btn{
+  background:linear-gradient(135deg,#00b09b,#0984e3);
+  box-shadow:0 4px 14px rgba(0,176,155,.28)
+}
+
+.status-bar{font-size:12px;color:#90a4ae;text-align:center;min-height:16px}
+.status-bar.ok{color:#00b894}
+.status-bar.err{color:#e53e3e}
+
+/* ── overlay ────────────────────────── */
+.overlay{
+  display:none;position:fixed;inset:0;
+  background:rgba(255,255,255,.82);backdrop-filter:blur(3px);
+  z-index:999;flex-direction:column;
+  align-items:center;justify-content:center;gap:14px
+}
+.overlay.show{display:flex}
+.spinner{
+  width:40px;height:40px;border:4px solid #e2e8f0;
+  border-top-color:#4361ee;border-radius:50%;
+  animation:spin .75s linear infinite
+}
+@keyframes spin{to{transform:rotate(360deg)}}
+.overlay-text{font-size:14px;color:#4a5568;font-weight:600}
+
+/* ── toast ──────────────────────────── */
+.toast{
+  position:fixed;top:20px;left:50%;
+  transform:translateX(-50%) translateY(-80px);
+  background:#2d3748;color:#fff;
+  padding:10px 22px;border-radius:10px;font-size:13px;
+  z-index:1001;transition:transform .3s cubic-bezier(.34,1.56,.64,1);
+  max-width:420px;text-align:center;box-shadow:0 4px 16px rgba(0,0,0,.18);
+  pointer-events:none
+}
+.toast.show{transform:translateX(-50%) translateY(0)}
+.toast.ok{background:#00b894}
+.toast.err{background:#e53e3e}
+</style>
+</head>
+<body>
+<div class="app">
+
+<!-- HEADER -->
+<header>
+  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+    <rect x="3" y="3" width="18" height="18" rx="2.5"/>
+    <line x1="9" y1="3" x2="9" y2="21"/><line x1="15" y1="3" x2="15" y2="21"/>
+    <line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/>
+  </svg>
+  <h1>表情包切分工具</h1>
+  <span class="tagline">点击上传 · 拖拽 · Ctrl+V 粘贴 · 支持多图</span>
+</header>
+
+<!-- MAIN -->
+<div class="main">
+
+  <!-- LEFT -->
+  <div class="left-panel">
+
+    <!-- Thumbnail strip (hidden until images are loaded) -->
+    <div class="thumb-strip" id="thumbStrip"></div>
+
+    <!-- Drop zone / preview -->
+    <div class="drop-zone" id="dropZone">
+      <div class="drop-placeholder" id="dropPlaceholder">
+        <div class="icon-wrap">
+          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#7986cb" stroke-width="1.6" stroke-linecap="round">
+            <rect x="3" y="3" width="18" height="18" rx="2"/>
+            <path d="M3 9h18M9 3v18"/>
+          </svg>
+        </div>
+        <h3>上传表情包整图</h3>
+        <p>支持同时上传多张，每张独立设置切分数量</p>
+        <div class="badges">
+          <span class="badge">点击上传</span>
+          <span class="badge">拖拽图片</span>
+          <span class="badge">Ctrl + V</span>
+        </div>
+        <p style="margin-top:6px;font-size:11px">支持 JPG · PNG · WEBP · GIF · BMP</p>
+      </div>
+      <canvas id="previewCanvas"></canvas>
+      <div class="paste-hint" id="pasteHint">已从剪贴板粘贴图片 ✓</div>
+    </div>
+  </div>
+
+  <!-- RIGHT -->
+  <div class="right-panel">
+
+    <!-- 1. Grid (per-image) -->
+    <div class="card">
+      <div class="card-title"><span class="num">1</span>切分数量（当前图片）</div>
+      <div class="row">
+        <label class="lbl">行 数：</label>
+        <input type="number" id="rowsInput" min="1" max="10" placeholder="—" oninput="onGridChange()">
+        <label style="min-width:44px;text-align:right">列 数：</label>
+        <input type="number" id="colsInput" min="1" max="10" placeholder="—" oninput="onGridChange()">
+      </div>
+      <div class="total-info" id="totalInfo">请先上传图片</div>
+    </div>
+
+    <!-- 2. Canvas size + safe zone -->
+    <div class="card">
+      <div class="card-title"><span class="num">2</span>输出画布尺寸</div>
+      <div class="row">
+        <label class="lbl">预 设：</label>
+        <select id="presetSelect" onchange="onPresetChange()"></select>
+      </div>
+      <div class="row">
+        <label class="lbl">宽 度：</label>
+        <input type="number" id="outW" value="240" min="1">
+        <label style="min-width:32px;text-align:right">高：</label>
+        <input type="number" id="outH" value="240" min="1">
+        <span style="color:#90a4ae;font-size:12px;white-space:nowrap">px</span>
+      </div>
+      <div class="row">
+        <label class="lbl">安全距离：</label>
+        <input type="number" id="safeZone" value="0" min="0" max="500" oninput="schedulePreview()">
+        <span style="color:#90a4ae;font-size:12px;white-space:nowrap">px（四边内边距）</span>
+      </div>
+      <div class="row">
+        <label class="lbl"></label>
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;color:#2d3748;font-size:13px">
+          <input type="checkbox" id="smartCenter" autocomplete="off" style="width:auto;cursor:pointer;accent-color:#4361ee">
+          智能居中（自动识别每格内容位置并居中）
+        </label>
+      </div>
+      <div class="row">
+        <label class="lbl">缩 放：</label>
+        <select id="scaleMode">
+          <option value="fit">等比缩放居中</option>
+          <option value="fill">拉伸填充</option>
+          <option value="center">原始尺寸居中</option>
+        </select>
+      </div>
+      <div class="row">
+        <label class="lbl">背 景：</label>
+        <div class="bg-picker">
+          <button class="bg-swatch transp active" data-value="transparent" title="透明"></button>
+          <button class="bg-swatch" data-value="#ffffff" title="白色" style="background:#fff"></button>
+          <button class="bg-swatch" data-value="#000000" title="黑色" style="background:#000"></button>
+          <button class="bg-swatch" data-value="#c8c8c8" title="浅灰" style="background:#c8c8c8"></button>
+          <input type="color" id="bgColorPicker" value="#4361ee" title="选择颜色" disabled style="opacity:.4">
+          <button id="bgEyedropper" class="btn-eyedropper" title="吸取页面颜色" style="display:none">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m2 22 1-1h3l9-9"/><path d="M3 21v-3l9-9"/><path d="m15 6 3.4-3.4a2.1 2.1 0 1 1 3 3L18 9l.4.4a2.1 2.1 0 1 1-3 3l-3.8-3.8Z"/></svg>
+          </button>
+          <input type="text" id="bgHexInput" class="bg-hex-input" maxlength="7" placeholder="透明" spellcheck="false" disabled>
+        </div>
+        <label style="min-width:32px;text-align:right">格式：</label>
+        <select id="outFmt" style="width:72px">
+          <option value="png">PNG</option>
+          <option value="jpeg">JPG</option>
+          <option value="webp">WEBP</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- 3. Save -->
+    <div class="card">
+      <div class="card-title"><span class="num">3</span>保存设置</div>
+      <div id="fsaRow" class="folder-row" style="display:none">
+        <button class="btn-sm" onclick="pickFolder()">选择文件夹</button>
+        <span class="dir-label" id="dirLabel">未选择，将下载 ZIP</span>
+      </div>
+      <div class="row">
+        <label class="lbl">文件名前缀：</label>
+        <input type="text" id="prefix" value="1" style="flex:1">
+      </div>
+      <div class="row">
+        <label class="lbl">命名格式：</label>
+        <input type="text" id="nameFmt" value="{prefix}-{row}-{col}" style="flex:1">
+      </div>
+      <div class="info-text">
+        变量：<code>{prefix}</code> <code>{row}</code> <code>{col}</code> <code>{n}</code> <code>{img}</code><br>
+        默认效果：1-1-1 / 1-1-2 …（{n} 为连续序号，{img} 为图片序号）<br>
+        多图生成时会自动按图片分文件夹
+      </div>
+    </div>
+
+    <!-- Buttons -->
+    <div class="gen-group">
+      <button class="gen-btn" id="genBtn" onclick="generate(false)" disabled>
+        ✂&nbsp; 生成当前图片
+      </button>
+      <button class="gen-btn gen-all-btn" id="genAllBtn" onclick="generate(true)" disabled style="display:none">
+        📦&nbsp; 全部生成
+      </button>
+    </div>
+    <div class="status-bar" id="statusBar"></div>
+
+  </div><!-- /right-panel -->
+</div><!-- /main -->
+</div><!-- /app -->
+
+<!-- Overlay -->
+<div class="overlay" id="overlay">
+  <div class="spinner"></div>
+  <div class="overlay-text" id="overlayText">正在生成…</div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<!-- File inputs -->
+<input type="file" id="fileInput" accept="image/*" multiple style="display:none" onchange="onFileChange()">
+
+<script>
+'use strict';
+
+// ── Presets ──────────────────────────────────────────────────────────────────
+const PRESETS = [
+  { name:'自定义',               w:null, h:null },
+  { name:'微信表情 240×240',     w:240,  h:240  },
+  { name:'微信表情 500×500',     w:500,  h:500  },
+  { name:'QQ 表情 200×200',     w:200,  h:200  },
+  { name:'QQ 表情 300×300',     w:300,  h:300  },
+  { name:'小红书 1:1  1080×1080',w:1080, h:1080 },
+  { name:'小红书 3:4  1080×1440',w:1080, h:1440 },
+  { name:'抖音 方形 1080×1080', w:1080, h:1080 },
+  { name:'抖音 竖版 1080×1920', w:1080, h:1920 },
+  { name:'TAPTAP 1280×720',     w:1280, h:720  },
+  { name:'Telegram 512×512',    w:512,  h:512  },
+  { name:'LINE 370×320',        w:370,  h:320  },
+  { name:'方形 240×240',         w:240,  h:240  },
+  { name:'方形 320×320',         w:320,  h:320  },
+  { name:'方形 480×480',         w:480,  h:480  },
+  { name:'方形 512×512',         w:512,  h:512  },
+  { name:'方形 1024×1024',       w:1024, h:1024 },
+];
+
+// ── State ────────────────────────────────────────────────────────────────────
+// Each entry: { img, dataUrl, imgW, imgH, rows, cols, name }
+const imageList = [];
+let activeIdx   = -1;
+let dirHandle   = null;
+let previewTimer = null;
+let toastTimer   = null;
+let currentBgColor = 'transparent'; // bg picker state
+
+function getBgColor() { return currentBgColor; }
+function setBgColor(val, skipHexUpdate) {
+  currentBgColor = val;
+  const isTransp = val === 'transparent';
+  document.querySelectorAll('.bg-swatch').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.value === val);
+  });
+  const picker = document.getElementById('bgColorPicker');
+  const hexInp = document.getElementById('bgHexInput');
+  if (isTransp) {
+    picker.style.opacity = '0.4';
+    picker.disabled = true;
+    hexInp.value = '';
+    hexInp.placeholder = '透明';
+    hexInp.disabled = true;
+  } else {
+    picker.style.opacity = '';
+    picker.disabled = false;
+    picker.value = val;
+    hexInp.disabled = false;
+    hexInp.placeholder = '#RRGGBB';
+    if (!skipHexUpdate) hexInp.value = val.toUpperCase();
+  }
+}
+function setupBgPicker() {
+  document.querySelectorAll('.bg-swatch').forEach(btn => {
+    btn.addEventListener('click', () => setBgColor(btn.dataset.value));
+  });
+  document.getElementById('bgColorPicker').addEventListener('input', e => {
+    setBgColor(e.target.value.toLowerCase());
+  });
+  document.getElementById('bgHexInput').addEventListener('input', e => {
+    let v = e.target.value.trim();
+    if (v.length > 0 && v[0] !== '#') v = '#' + v;
+    if (/^#[0-9a-fA-F]{6}$/.test(v)) {
+      currentBgColor = v.toLowerCase();
+      document.querySelectorAll('.bg-swatch').forEach(b => b.classList.remove('active'));
+      document.getElementById('bgColorPicker').value = v;
+    }
+  });
+  const eyeBtn = document.getElementById('bgEyedropper');
+  if ('EyeDropper' in window) {
+    eyeBtn.style.display = 'flex';
+    eyeBtn.addEventListener('click', async () => {
+      try {
+        const result = await new EyeDropper().open();
+        setBgColor(result.sRGBHex.toLowerCase());
+      } catch(e) { /* cancelled */ }
+    });
+  }
+}
+
+// ── Init ─────────────────────────────────────────────────────────────────────
+(function init() {
+  const sel = document.getElementById('presetSelect');
+  PRESETS.forEach((p, i) => {
+    const opt = document.createElement('option');
+    opt.value = i; opt.textContent = p.name;
+    sel.appendChild(opt);
+  });
+  sel.value = 1;
+  onPresetChange();
+
+  if (window.showDirectoryPicker) {
+    document.getElementById('fsaRow').style.display = 'flex';
+  }
+
+  setupDropZone();
+  setupPaste();
+  setupBgPicker();
+
+  const ro = new ResizeObserver(() => { if (activeIdx >= 0) schedulePreview(); });
+  ro.observe(document.getElementById('dropZone'));
+})();
+
+// ── Drop zone ────────────────────────────────────────────────────────────────
+function setupDropZone() {
+  const dz = document.getElementById('dropZone');
+  dz.addEventListener('click', () => document.getElementById('fileInput').click());
+  dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('dragover'); });
+  dz.addEventListener('dragleave', e => { if (!dz.contains(e.relatedTarget)) dz.classList.remove('dragover'); });
+  dz.addEventListener('drop', e => {
+    e.preventDefault(); dz.classList.remove('dragover');
+    const imgs = [...e.dataTransfer.files].filter(f => f.type.startsWith('image/'));
+    if (imgs.length) imgs.forEach(loadFile);
+    else toast('请拖入图片文件', 'err');
+  });
+}
+
+// ── Ctrl+V paste ─────────────────────────────────────────────────────────────
+function setupPaste() {
+  document.addEventListener('paste', e => {
+    const tag = document.activeElement?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (const item of items) {
+      if (item.type.startsWith('image/')) {
+        const file = item.getAsFile();
+        if (file) { loadFile(file); showPasteHint(); break; }
+      }
+    }
+  });
+}
+
+function showPasteHint() {
+  const h = document.getElementById('pasteHint');
+  h.classList.add('show');
+  setTimeout(() => h.classList.remove('show'), 2200);
+}
+
+// ── File input ───────────────────────────────────────────────────────────────
+function onFileChange() {
+  const files = document.getElementById('fileInput').files;
+  [...files].forEach(loadFile);
+  document.getElementById('fileInput').value = '';
+}
+
+// ── Load one file ─────────────────────────────────────────────────────────────
+function loadFile(file) {
+  const reader = new FileReader();
+  reader.onload = ev => {
+    const dataUrl = ev.target.result;
+    const img = new Image();
+    img.onload = () => {
+      const item = {
+        img, dataUrl,
+        imgW: img.naturalWidth, imgH: img.naturalHeight,
+        rows: null, cols: null,
+        name: file.name.replace(/\.[^.]+$/, ''),
+      };
+      imageList.push(item);
+      showThumbStrip();
+      renderThumbs();
+      setActive(imageList.length - 1); // triggers detect
+    };
+    img.onerror = () => toast('图片格式不受支持', 'err');
+    img.src = dataUrl;
+  };
+  reader.readAsDataURL(file);
+}
+
+// ── Show strip ───────────────────────────────────────────────────────────────
+function showThumbStrip() {
+  document.getElementById('dropPlaceholder').style.display = 'none';
+  document.getElementById('previewCanvas').style.display = 'block';
+}
+
+function hideThumbStrip() {
+  document.getElementById('dropPlaceholder').style.display = '';
+  document.getElementById('previewCanvas').style.display = 'none';
+}
+
+// ── Thumbnails ────────────────────────────────────────────────────────────────
+function renderThumbs() {
+  const strip = document.getElementById('thumbStrip');
+  strip.innerHTML = '';
+
+  imageList.forEach((item, i) => {
+    const div = document.createElement('div');
+    div.className = 'thumb-item' + (i === activeIdx ? ' active' : '');
+
+    const imgEl = document.createElement('img');
+    imgEl.src = item.dataUrl;
+    div.appendChild(imgEl);
+
+    // badge: rows × cols
+    const badge = document.createElement('div');
+    badge.className = 'thumb-badge';
+    badge.textContent = item.rows && item.cols
+      ? `${item.rows}×${item.cols}`
+      : '…';
+    div.appendChild(badge);
+
+    // delete button
+    const del = document.createElement('button');
+    del.className = 'thumb-del';
+    del.title = '删除';
+    del.innerHTML = '×';
+    del.onclick = e => { e.stopPropagation(); deleteImage(i); };
+    div.appendChild(del);
+
+    div.onclick = () => setActive(i);
+    strip.appendChild(div);
+  });
+
+  // Add button
+  const add = document.createElement('div');
+  add.className = 'thumb-add';
+  add.title = '添加更多图片';
+  add.innerHTML = `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg><span>添加</span>`;
+  add.onclick = () => document.getElementById('fileInput').click();
+  strip.appendChild(add);
+
+  // Show/hide "全部生成" button
+  const btn = document.getElementById('genAllBtn');
+  btn.style.display = imageList.length >= 2 ? 'block' : 'none';
+  if (imageList.length >= 2) {
+    btn.textContent = `📦  全部生成（${imageList.length} 张）`;
+  }
+}
+
+// ── Delete image ─────────────────────────────────────────────────────────────
+function deleteImage(idx) {
+  // Save current inputs before deleting if deleting active
+  if (idx === activeIdx) saveGridToActive();
+
+  imageList.splice(idx, 1);
+
+  if (imageList.length === 0) {
+    activeIdx = -1;
+    hideThumbStrip();
+    document.getElementById('genBtn').disabled = true;
+    document.getElementById('genAllBtn').style.display = 'none';
+    document.getElementById('totalInfo').textContent = '请先上传图片';
+    document.getElementById('rowsInput').value = '';
+    document.getElementById('colsInput').value = '';
+    setStatus('');
+    renderThumbs();
+    return;
+  }
+
+  const newIdx = Math.min(idx, imageList.length - 1);
+  renderThumbs();
+  setActive(newIdx);
+}
+
+// ── Set active image ──────────────────────────────────────────────────────────
+function setActive(idx) {
+  // Save current grid inputs to previously active item
+  if (activeIdx >= 0 && activeIdx < imageList.length) {
+    saveGridToActive();
+  }
+
+  activeIdx = idx;
+  if (idx < 0 || idx >= imageList.length) return;
+
+  const item = imageList[idx];
+
+  // Load this image's grid into inputs
+  if (item.rows !== null) {
+    document.getElementById('rowsInput').value = item.rows;
+    document.getElementById('colsInput').value = item.cols;
+    updateTotalInfo();
+    schedulePreview();
+  } else {
+    document.getElementById('rowsInput').value = '';
+    document.getElementById('colsInput').value = '';
+    document.getElementById('totalInfo').textContent = '请设置行数和列数';
+    schedulePreview();
+  }
+
+  document.getElementById('genBtn').disabled = false;
+  document.getElementById('genAllBtn').disabled = false;
+  renderThumbs();
+}
+
+function saveGridToActive() {
+  if (activeIdx < 0 || activeIdx >= imageList.length) return;
+  const r = getRows(), c = getCols();
+  if (r && c) {
+    imageList[activeIdx].rows = r;
+    imageList[activeIdx].cols = c;
+  }
+}
+
+// ── Grid input ────────────────────────────────────────────────────────────────
+function onGridChange() {
+  saveGridToActive();
+  updateTotalInfo();
+  renderThumbs();
+  schedulePreview();
+}
+
+function updateTotalInfo() {
+  const rows = getRows(), cols = getCols();
+  if (!rows || !cols) { document.getElementById('totalInfo').textContent = '请设置行数和列数'; return; }
+  const total = rows * cols;
+  document.getElementById('totalInfo').textContent = `共 ${total} 个表情包（${rows} 行 × ${cols} 列）`;
+}
+
+function getRows() { return clamp(parseInt(document.getElementById('rowsInput').value) || 0, 0, 10) || null; }
+function getCols() { return clamp(parseInt(document.getElementById('colsInput').value) || 0, 0, 10) || null; }
+
+// ── Preset ────────────────────────────────────────────────────────────────────
+function onPresetChange() {
+  const p = PRESETS[parseInt(document.getElementById('presetSelect').value)];
+  const wEl = document.getElementById('outW'), hEl = document.getElementById('outH');
+  if (p?.w) { wEl.value = p.w; hEl.value = p.h; wEl.disabled = hEl.disabled = true; }
+  else { wEl.disabled = hEl.disabled = false; }
+}
+
+// ── Preview ───────────────────────────────────────────────────────────────────
+function schedulePreview() {
+  clearTimeout(previewTimer);
+  previewTimer = setTimeout(drawPreview, 120);
+}
+
+function drawPreview() {
+  if (activeIdx < 0) return;
+  const item = imageList[activeIdx];
+  if (!item) return;
+
+  const rows = item.rows || getRows() || 1;
+  const cols = item.cols || getCols() || 1;
+  const dz = document.getElementById('dropZone');
+  const cv = document.getElementById('previewCanvas');
+  const cw = dz.clientWidth, ch = dz.clientHeight;
+  if (cw < 10 || ch < 10) return;
+
+  cv.width = cw; cv.height = ch;
+  const ctx = cv.getContext('2d');
+  ctx.clearRect(0, 0, cw, ch);
+
+  const imgW = item.imgW, imgH = item.imgH;
+  const scale = Math.min(cw / imgW, ch / imgH, 1);
+  const dw = Math.round(imgW * scale), dh = Math.round(imgH * scale);
+  const ox = Math.round((cw - dw) / 2), oy = Math.round((ch - dh) / 2);
+
+  ctx.drawImage(item.img, ox, oy, dw, dh);
+
+  // Safe zone preview overlay
+  const safe = parseInt(document.getElementById('safeZone').value) || 0;
+  const outW = parseInt(document.getElementById('outW').value) || 240;
+  const outH = parseInt(document.getElementById('outH').value) || 240;
+  if (safe > 0) {
+    // Safe zone: subtle dashed inner border on each cell
+    const safeRatioW = safe / outW;
+    const safeRatioH = safe / outH;
+    const cellW = dw / cols, cellH = dh / rows;
+    ctx.save();
+    ctx.setLineDash([4, 3]);
+    ctx.strokeStyle = 'rgba(0,0,0,.22)';
+    ctx.lineWidth = 1;
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const cx = ox + c * cellW + cellW * safeRatioW;
+        const cy = oy + r * cellH + cellH * safeRatioH;
+        const cw2 = cellW * (1 - 2 * safeRatioW);
+        const ch2 = cellH * (1 - 2 * safeRatioH);
+        if (cw2 > 0 && ch2 > 0) ctx.strokeRect(cx, cy, cw2, ch2);
+      }
+    }
+    ctx.restore();
+  }
+
+  // Grid lines
+  ctx.save();
+  ctx.strokeStyle = 'rgba(220,50,50,.88)';
+  ctx.lineWidth = 2;
+  ctx.setLineDash([]);
+  for (let r = 1; r < rows; r++) {
+    const y = oy + Math.round(dh * r / rows);
+    ctx.beginPath(); ctx.moveTo(ox, y); ctx.lineTo(ox + dw, y); ctx.stroke();
+  }
+  for (let c = 1; c < cols; c++) {
+    const x = ox + Math.round(dw * c / cols);
+    ctx.beginPath(); ctx.moveTo(x, oy); ctx.lineTo(x, oy + dh); ctx.stroke();
+  }
+
+  // Cell numbers
+  const fw = dw / cols, fh = dh / rows;
+  const fs = Math.max(11, Math.min(18, Math.round(Math.min(fw, fh) * 0.22)));
+  ctx.font = `bold ${fs}px "Microsoft YaHei",sans-serif`;
+  ctx.textBaseline = 'top';
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const n = r * cols + c + 1;
+      const tx = ox + c * fw + 6, ty = oy + r * fh + 5;
+      ctx.fillStyle = 'rgba(0,0,0,.55)'; ctx.fillText(n, tx+1, ty+1);
+      ctx.fillStyle = 'rgb(220,50,50)';   ctx.fillText(n, tx, ty);
+    }
+  }
+  ctx.restore();
+}
+
+// ── Folder picker ─────────────────────────────────────────────────────────────
+async function pickFolder() {
+  try {
+    dirHandle = await window.showDirectoryPicker({ mode: 'readwrite' });
+    document.getElementById('dirLabel').textContent = `已选择：${dirHandle.name}`;
+  } catch(e) {
+    if (e.name !== 'AbortError') toast('无法访问文件夹：' + e.message, 'err');
+  }
+}
+
+// ── Generate ──────────────────────────────────────────────────────────────────
+async function generate(all = false) {
+  saveGridToActive();
+
+  const targets = all ? [...imageList] : (activeIdx >= 0 ? [imageList[activeIdx]] : []);
+  if (!targets.length) { toast('请先上传图片', 'err'); return; }
+
+  // Validate all targets have rows/cols
+  for (const t of targets) {
+    if (!t.rows || !t.cols) { toast('请先完成切分数量设置', 'err'); return; }
+  }
+
+  const outW = parseInt(document.getElementById('outW').value)    || 240;
+  const outH = parseInt(document.getElementById('outH').value)    || 240;
+  const safe = parseInt(document.getElementById('safeZone').value) || 0;
+  if (outW < 1 || outH < 1) { toast('画布尺寸必须大于 0', 'err'); return; }
+
+  const settings = {
+    outW, outH, safe,
+    prefix      : document.getElementById('prefix').value  || '1',
+    nameFmt     : document.getElementById('nameFmt').value || '{prefix}-{row}-{col}',
+    fmt         : document.getElementById('outFmt').value,
+    bg          : getBgColor(),
+    mode        : document.getElementById('scaleMode').value,
+    smartCenter : document.getElementById('smartCenter').checked,
+  };
+
+  showOverlay('正在生成…');
+  setStatus('');
+
+  try {
+    if (targets.length === 1) {
+      // ── Single image ──────────────────────────────
+      const cells = await generateCells(targets[0], 0, 1, settings);
+      if (dirHandle) {
+        await saveToFolder(cells, null);
+      } else {
+        const name = targets[0].name || '表情包';
+        await saveAsZip(cells, `${name}_${targets[0].rows}×${targets[0].cols}`);
+      }
+      toast(`✓ 已生成 ${cells.length} 个表情包`, 'ok');
+      setStatus(`✓ 成功生成 ${cells.length} 个表情包`, 'ok');
+
+    } else {
+      // ── Multiple images → ZIP with subfolders ─────
+      const zip = new JSZip();
+      let totalCells = 0;
+
+      for (let i = 0; i < targets.length; i++) {
+        setOverlayText(`正在处理第 ${i+1} / ${targets.length} 张图片…`);
+        const cells = await generateCells(targets[i], i, targets.length, settings);
+        const folderName = targets[i].name || `图片${i+1}`;
+        for (const { name, blob } of cells) {
+          zip.folder(folderName).file(name, blob);
+        }
+        totalCells += cells.length;
+      }
+
+      if (dirHandle) {
+        // Save to folder with subfolders (FSA)
+        setOverlayText('正在保存到文件夹…');
+        for (let i = 0; i < targets.length; i++) {
+          const cells = await generateCells(targets[i], i, targets.length, settings);
+          const folderName = targets[i].name || `图片${i+1}`;
+          const sub = await dirHandle.getDirectoryHandle(folderName, { create: true });
+          for (const { name, blob } of cells) {
+            const fh = await sub.getFileHandle(name, { create: true });
+            const w  = await fh.createWritable();
+            await w.write(blob); await w.close();
+          }
+        }
+        toast(`✓ 已保存 ${totalCells} 个表情包到文件夹`, 'ok');
+        setStatus(`✓ 成功保存 ${totalCells} 个表情包（${targets.length} 张图片）`, 'ok');
+      } else {
+        setOverlayText('正在打包 ZIP…');
+        const zipBlob = await zip.generateAsync({ type:'blob', compression:'DEFLATE' }, meta => {
+          setOverlayText(`正在压缩… ${meta.percent.toFixed(0)}%`);
+        });
+        dlBlob(zipBlob, `表情包合集_${targets.length}张.zip`);
+        toast(`✓ 已生成 ${totalCells} 个表情包，ZIP 下载中`, 'ok');
+        setStatus(`✓ 成功生成 ${totalCells} 个表情包（${targets.length} 张图片）`, 'ok');
+      }
+    }
+  } catch(e) {
+    toast('生成失败：' + e.message, 'err');
+    setStatus('生成失败：' + e.message, 'err');
+    console.error(e);
+  } finally {
+    hideOverlay();
+  }
+}
+
+// ── Content bounds detection ─────────────────────────────────────────────────
+// Uses row/column luminance projections + edge-median background estimation.
+// Far more robust than corner sampling for JPEG images with compression artifacts.
+function findContentBounds(imgData, w, h) {
+  const data = imgData.data;
+
+  // ① Transparent background check
+  let hasTransparent = false;
+  const step = Math.max(1, Math.floor(Math.min(w, h) / 24));
+  outerT: for (let x = 0; x < w; x += step) {
+    if (data[x*4+3] < 30 || data[((h-1)*w+x)*4+3] < 30) { hasTransparent = true; break outerT; }
+  }
+  if (!hasTransparent) for (let y = step; y < h - step; y += step) {
+    if (data[y*w*4+3] < 30 || data[(y*w+w-1)*4+3] < 30) { hasTransparent = true; break; }
+  }
+
+  if (hasTransparent) {
+    let minX=w, maxX=-1, minY=h, maxY=-1;
+    for (let y=0; y<h; y++) for (let x=0; x<w; x++) {
+      if (data[(y*w+x)*4+3] > 10) {
+        if (x<minX) minX=x; if (x>maxX) maxX=x;
+        if (y<minY) minY=y; if (y>maxY) maxY=y;
+      }
+    }
+    return maxX < 0 ? { minX:0, maxX:w-1, minY:0, maxY:h-1 } : { minX, maxX, minY, maxY };
+  }
+
+  // ② Background luminance: modal value from full-cell pixel histogram
+  //    Background is the dominant color; histogram mode is immune to separator
+  //    line bias and works regardless of where content sits within the cell
+  const hist = new Float32Array(256);
+  const rowLum = new Float32Array(h);
+  for (let y = 0; y < h; y++) {
+    let s = 0;
+    for (let x = 0; x < w; x++) {
+      const i = (y*w+x)*4;
+      const lum = 0.299*data[i]+0.587*data[i+1]+0.114*data[i+2];
+      s += lum;
+      hist[Math.round(lum)]++;
+    }
+    rowLum[y] = s / w;
+  }
+  let maxH = 0, bgLum = 240;
+  for (let l = 0; l < 256; l++) if (hist[l] > maxH) { maxH = hist[l]; bgLum = l; }
+
+  // ③ Column luminance projections
+  const colLum = new Float32Array(w);
+  for (let x = 0; x < w; x++) {
+    let s = 0;
+    for (let y = 0; y < h; y++) { const i=(y*w+x)*4; s += 0.299*data[i]+0.587*data[i+1]+0.114*data[i+2]; }
+    colLum[x] = s / h;
+  }
+
+  // ④ Inward scan — thr=10 safely includes light-colored emoji content
+  //    while still excluding uniform background rows/cols (noise ≤ 2–3 units)
+  const thr = 15;
+  let top=0, bot=h-1, lft=0, rgt=w-1;
+  while (top < bot && Math.abs(rowLum[top] - bgLum) <= thr) top++;
+  while (bot > top && Math.abs(rowLum[bot] - bgLum) <= thr) bot--;
+  while (lft < rgt && Math.abs(colLum[lft] - bgLum) <= thr) lft++;
+  while (rgt > lft && Math.abs(colLum[rgt] - bgLum) <= thr) rgt--;
+
+  if (top >= bot || lft >= rgt) return { minX:0, maxX:w-1, minY:0, maxY:h-1 };
+  return { minX:lft, maxX:rgt, minY:top, maxY:bot };
+}
+
+// ── Generate cells for one image ─────────────────────────────────────────────
+async function generateCells(imgObj, imgIndex, totalImages, s) {
+  const { img, imgW, imgH, rows, cols, name: imgName } = imgObj;
+  const { outW, outH, safe, prefix, nameFmt, fmt, bg, mode, smartCenter } = s;
+  const ext  = fmt === 'jpeg' ? 'jpg' : fmt;
+  const mime = `image/${fmt}`;
+  const qual = fmt === 'png' ? undefined : 0.92;
+
+  const contentW = Math.max(1, outW - 2 * safe);
+  const contentH = Math.max(1, outH - 2 * safe);
+  const cells = [];
+
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      // Integer cell boundaries
+      const x0 = Math.round(imgW * c       / cols);
+      const y0 = Math.round(imgH * r       / rows);
+      const x1 = Math.round(imgW * (c + 1) / cols);
+      const y1 = Math.round(imgH * (r + 1) / rows);
+      const cw = x1 - x0, ch = y1 - y0;
+
+      const oc  = document.createElement('canvas');
+      oc.width  = outW; oc.height = outH;
+      const ctx = oc.getContext('2d');
+
+      // Background
+      if (bg !== 'transparent') { ctx.fillStyle = bg; ctx.fillRect(0, 0, outW, outH); }
+
+      if (smartCenter) {
+        // ── Smart center: find actual content bounds within this cell ──────
+        const tmp = document.createElement('canvas');
+        tmp.width = cw; tmp.height = ch;
+        const tmpCtx = tmp.getContext('2d');
+        tmpCtx.drawImage(img, x0, y0, cw, ch, 0, 0, cw, ch);
+        const imgData = tmpCtx.getImageData(0, 0, cw, ch);
+        const b = findContentBounds(imgData, cw, ch);
+
+        // Source region: content bounding box in original image coordinates
+        const srcX = x0 + b.minX, srcY = y0 + b.minY;
+        const srcW = b.maxX - b.minX + 1, srcH = b.maxY - b.minY + 1;
+
+        // Scale content to fit within safe zone area, then center it
+        const sc = Math.min(contentW / srcW, contentH / srcH);
+        const nw = srcW * sc, nh = srcH * sc;
+        const dx = Math.round(safe + (contentW - nw) / 2);
+        const dy = Math.round(safe + (contentH - nh) / 2);
+        ctx.drawImage(img, srcX, srcY, srcW, srcH, dx, dy, nw, nh);
+
+      } else {
+        // ── Normal rendering ───────────────────────────────────────────────
+        if (mode === 'fit') {
+          const sc = Math.min(contentW / cw, contentH / ch);
+          const nw = cw * sc, nh = ch * sc;
+          const dx = Math.round(safe + (contentW - nw) / 2);
+          const dy = Math.round(safe + (contentH - nh) / 2);
+          ctx.drawImage(img, x0, y0, cw, ch, dx, dy, nw, nh);
+        } else if (mode === 'fill') {
+          ctx.drawImage(img, x0, y0, cw, ch, safe, safe, contentW, contentH);
+        } else {
+          const dx = Math.round(safe + (contentW - cw) / 2);
+          const dy = Math.round(safe + (contentH - ch) / 2);
+          if (cw <= contentW && ch <= contentH) {
+            // cell fits in content area: draw at original size, centered
+            ctx.drawImage(img, x0, y0, cw, ch, dx, dy, cw, ch);
+          } else {
+            // cell larger than content area: scale down to fit (avoid clipping)
+            const sc = Math.min(contentW / cw, contentH / ch);
+            const nw = cw * sc, nh = ch * sc;
+            const fdx = Math.round(safe + (contentW - nw) / 2);
+            const fdy = Math.round(safe + (contentH - nh) / 2);
+            ctx.drawImage(img, x0, y0, cw, ch, fdx, fdy, nw, nh);
+          }
+        }
+      }
+
+      const blob = await canvasToBlob(oc, mime, qual);
+      const n    = r * cols + c + 1;
+      let name   = nameFmt
+        .replace(/\{prefix\}/g,  prefix)
+        .replace(/\{row\}/g,     r + 1)
+        .replace(/\{col\}/g,     c + 1)
+        .replace(/\{n\}/g,       n)
+        .replace(/\{img\}/g,     imgIndex + 1)
+        .replace(/\{imgname\}/g, imgName);
+      name = name.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_');
+      cells.push({ name: `${name}.${ext}`, blob });
+
+      setOverlayText(`正在处理 ${imgIndex > 0 ? `图片 ${imgIndex+1} — ` : ''}第 ${n} / ${rows * cols} 个…`);
+    }
+  }
+  return cells;
+}
+
+// ── Save helpers ──────────────────────────────────────────────────────────────
+async function saveToFolder(cells, subFolderName) {
+  const target = subFolderName
+    ? await dirHandle.getDirectoryHandle(subFolderName, { create: true })
+    : dirHandle;
+  for (let i = 0; i < cells.length; i++) {
+    const { name, blob } = cells[i];
+    setOverlayText(`正在保存 ${i+1} / ${cells.length}：${name}`);
+    const fh = await target.getFileHandle(name, { create: true });
+    const w  = await fh.createWritable();
+    await w.write(blob); await w.close();
+  }
+}
+
+async function saveAsZip(cells, zipName) {
+  if (typeof JSZip === 'undefined') {
+    for (const { name, blob } of cells) {
+      dlBlob(blob, name); await sleep(200);
+    }
+    return;
+  }
+  setOverlayText('正在打包 ZIP…');
+  const zip = new JSZip();
+  for (const { name, blob } of cells) zip.file(name, blob);
+  const zipBlob = await zip.generateAsync({ type:'blob', compression:'DEFLATE' }, meta => {
+    setOverlayText(`正在压缩… ${meta.percent.toFixed(0)}%`);
+  });
+  dlBlob(zipBlob, `${zipName}.zip`);
+}
+
+function dlBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = Object.assign(document.createElement('a'), { href: url, download: filename });
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function canvasToBlob(canvas, mime, quality) {
+  return new Promise((res, rej) => {
+    canvas.toBlob(b => b ? res(b) : rej(new Error('toBlob 失败')), mime, quality);
+  });
+}
+
+// ── UI helpers ────────────────────────────────────────────────────────────────
+function showOverlay(t) {
+  document.getElementById('overlayText').textContent = t;
+  document.getElementById('overlay').classList.add('show');
+  document.getElementById('genBtn').disabled = true;
+  document.getElementById('genAllBtn').disabled = true;
+}
+function setOverlayText(t) { document.getElementById('overlayText').textContent = t; }
+function hideOverlay() {
+  document.getElementById('overlay').classList.remove('show');
+  document.getElementById('genBtn').disabled   = activeIdx < 0;
+  document.getElementById('genAllBtn').disabled = activeIdx < 0;
+}
+
+function toast(msg, type = '') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'toast show' + (type ? ' ' + type : '');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 3200);
+}
+
+function setStatus(msg, type = '') {
+  const el = document.getElementById('statusBar');
+  el.textContent = msg;
+  el.className = 'status-bar' + (type ? ' ' + type : '');
+}
+
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+</script>
+</body>
+</html>
