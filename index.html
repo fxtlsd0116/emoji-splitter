@@ -1069,10 +1069,13 @@ async function generateCells(imgObj, imgIndex, totalImages, s) {
         // Scale detected content to fit within the content area
         const sc = Math.min(contentW / srcW, contentH / srcH);
         const nw = srcW * sc, nh = srcH * sc;
-        // Use content centroid (not bounding-box centre) so visual mass lands
-        // at the output centre even when content is asymmetric within its bbox
-        const dx = Math.round(safe + contentW / 2 - (b.cx - b.minX) * sc);
-        const dy = Math.round(safe + contentH / 2 - (b.cy - b.minY) * sc);
+        // Positioning: blend weighted centroid (50%) with geometric bbox centre (50%).
+        // Pure centroid over-corrects when asymmetric elements (shadows, labels)
+        // skew the mass away from the visual centre, causing ~10 px vertical drift.
+        const useX = (b.cx - b.minX) * 0.5 + srcW * 0.25;
+        const useY = (b.cy - b.minY) * 0.5 + srcH * 0.25;
+        const dx = Math.round(safe + contentW / 2 - useX * sc);
+        const dy = Math.round(safe + contentH / 2 - useY * sc);
         ctx.drawImage(img, srcX, srcY, srcW, srcH, dx, dy, nw, nh);
 
       } else {
